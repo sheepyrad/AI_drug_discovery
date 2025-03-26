@@ -1,6 +1,0 @@
-compound_id,smiles,pose_pred_out,re_scored_values
-NS5_ligand_10,O=C(O)[C@@H](CO)C[C@@H]1CCCOCC1,"{'0.pdbqt': [[-5.2, -5.0, -5.0, -4.9, -4.7, -4.7, -4.7, -4.6, -4.6], './outputs/pose_0.pdbqt'], '1.pdbqt': [[-5.3, -5.2, -5.0, -5.0, -5.0, -4.9, -4.8, -4.8, -4.7], './outputs/pose_1.pdbqt']}",{}
-NS5_ligand_14,CS(=O)(=O)NC(=O)CC1=C[C@H](N)CO1,"{'0.pdbqt': [[-5.4, -5.4, -5.3, -5.3, -5.3, -5.2, -5.2, -5.1, -5.1], './outputs/pose_0.pdbqt'], '1.pdbqt': [[-5.1, -5.1, -4.8, -4.8, -4.7, -4.7, -4.6, -4.6, -4.5], './outputs/pose_1.pdbqt']}",{}
-NS5_ligand_15,COC(=O)c1cc([C@@H]2[C@H](O)[C@H](O)[C@@H]3CC=CCC[C@@]23F)ccc1S(O)(O)O,"{'0.pdbqt': [[-7.2, -7.2, -6.6, -6.6, -6.4, -6.3, -6.2, -6.2, -6.2], './outputs/pose_0.pdbqt']}",{}
-NS5_ligand_3,CCO[C@@H]1C[C@@]1(O)[C@H](OO)ON(C)CC[C@@H]1[C@@H]2C[C@]12OP(=O)(O)O,{},{}
-NS5_ligand_6,OC[C@H](COC[C@@H](OO)[C@@H]1C[C@@H](C(O)O)CO1)[C@@H](O)CO,"{'0.pdbqt': [[-5.0, -5.0, -5.0, -5.0, -5.0, -4.8, -4.8, -4.8, -4.8], './outputs/pose_0.pdbqt']}",{}

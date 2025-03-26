@@ -36,13 +36,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 logger.info("Starting pipeline...")
 
-# Import functions from the submodules.
-from ligand_generation import run_ligand_generation
-from energy_minimization_module import split_sdf_file, optimize_ligand, concatenate_sdf_files_sorted
-from pose_evaluation import run_posebuster, extract_valid_ligands
-from redocking import redock_compound, vfu_dir
-from medchem_filter import generative_filter  # uses the SDF filename as input
-from dock_synformer_compounds import dock_synformer_compounds
+# Import functions from the utils modules
+from utils.ligand_generation import run_ligand_generation
+from utils.energy_minimization_module import split_sdf_file, optimize_ligand, concatenate_sdf_files_sorted
+from utils.pose_evaluation import run_posebuster, extract_valid_ligands
+from utils.redocking import redock_compound, vfu_dir
+from utils.medchem_filter import generative_filter  # uses the SDF filename as input
+from utils.dock_synformer_compounds import dock_synformer_compounds
 
 def main(out_dir, rounds, checkpoint, pdbfile, resi_list, n_samples, sanitize,
          protein_file, base_name, prep_only, program_choice, scoring_function,

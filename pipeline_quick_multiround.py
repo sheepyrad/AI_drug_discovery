@@ -31,6 +31,8 @@ from multiprocessing import Process, Queue
 from contextlib import contextmanager
 import queue
 import threading
+import json
+from datetime import datetime
 
 # Set up thread-safe logging with QueueHandler and QueueListener
 class ThreadSafeRotatingFileHandler(logging.FileHandler):
@@ -76,11 +78,11 @@ root_logger.addHandler(file_handler)
 logger = logging.getLogger(__name__)
 logger.info("Starting quick pipeline...")
 
-# Import functions from the submodules
-from ligand_generation import run_ligand_generation
-from redocking import redock_compound, vfu_dir
-from retrosynformer import run_retrosynthesis
-from medchem_filter import generative_filter, filter_compounds
+# Import functions from the utils modules
+from utils.ligand_generation import run_ligand_generation
+from utils.redocking import redock_compound, vfu_dir
+from utils.retrosynformer import run_retrosynthesis
+from utils.medchem_filter import generative_filter, filter_compounds
 
 def extract_smiles_from_sdf(sdf_file):
     """
@@ -510,6 +512,54 @@ def run_retrosynthesis_with_timeout(smiles, output_path, timeout=300):
     
     return False
 
+def update_tracking_report(report_file, new_data, report_type="compound"):
+    """
+    Incrementally update the tracking report with new data.
+    
+    Args:
+        report_file: Path to the report CSV file
+        new_data: Dictionary containing the new data to add
+        report_type: Type of data being added ("compound", "variant", or "docking")
+    """
+    try:
+        # Create base columns for the report
+        base_columns = [
+            'compound_id', 'barcode', 'generation', 'round', 'smiles',
+            'parent_id', 'status', 'source', 'timestamp'
+        ]
+        
+        # Add type-specific columns
+        if report_type == "variant":
+            base_columns.extend(['source_compound', 'parent_barcode', 'score'])
+        elif report_type == "docking":
+            base_columns.extend(['docking_score', 'best_pose'])
+        
+        # Add timestamp to the new data
+        new_data['timestamp'] = datetime.now().isoformat()
+        
+        # Create or load existing report
+        if report_file.exists():
+            df = pd.read_csv(report_file)
+            # Add any new columns that might be in the new data
+            for col in new_data.keys():
+                if col not in df.columns:
+                    df[col] = None
+        else:
+            df = pd.DataFrame(columns=base_columns)
+        
+        # Convert new data to DataFrame row
+        new_row = pd.DataFrame([new_data])
+        
+        # Append new data
+        df = pd.concat([df, new_row], ignore_index=True)
+        
+        # Save updated report
+        df.to_csv(report_file, index=False)
+        logger.debug(f"Updated tracking report with new {report_type} data")
+        
+    except Exception as e:
+        logger.error(f"Error updating tracking report: {e}")
+
 def main(out_dir, checkpoint, pdbfile, resi_list, n_samples, sanitize,
          protein_file, receptor, program_choice="qvina", scoring_function="nnscore2",
          center=(114.817, 75.602, 82.416), box_size=(38, 70, 58),
@@ -542,22 +592,19 @@ def main(out_dir, checkpoint, pdbfile, resi_list, n_samples, sanitize,
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     
-    # Create a master directory for tracking all rounds
+    # Create tracking report files
     master_dir = out_dir / "master_tracking"
     master_dir.mkdir(exist_ok=True)
-    
-    # List to keep track of all compounds across all rounds
-    all_compounds_across_rounds = []
-    all_variants_across_rounds = []
-    all_redock_results_across_rounds = []
+    master_report = master_dir / "master_compound_tracking_report.csv"
     
     # Loop through each round
     for round_num in range(1, num_rounds + 1):
         logger.info(f"============= STARTING ROUND {round_num}/{num_rounds} =============")
         
-        # Create round-specific directory
+        # Create round-specific directory and report
         round_dir = out_dir / f"round_{round_num}"
         round_dir.mkdir(exist_ok=True)
+        round_report = round_dir / f"round_{round_num}_tracking_report.csv"
         
         # Set up round-specific subdirectories
         ligand_gen_dir = round_dir / "ligand_generation"
@@ -587,204 +634,115 @@ def main(out_dir, checkpoint, pdbfile, resi_list, n_samples, sanitize,
             log_callback=logger.info
         )
         lg_thread.join()
-        logger.info(f"Round {round_num}: Ligand generation complete. Output: {ligand_gen_out}")
         
-        # Step 2: Extract SMILES from SDF
+        # Step 2: Process compounds and update tracking
         compounds = extract_smiles_from_sdf(ligand_gen_out)
         if not compounds:
             logger.error(f"Round {round_num}: No valid compounds generated. Skipping this round.")
             continue
         
-        logger.info(f"Round {round_num}: Processing all {len(compounds)} valid generated compounds")
-        
-        # Add barcodes to each generated compound
+        # Process each compound and update tracking in real-time
         for idx, compound in enumerate(compounds):
-            # Generate a unique barcode for each compound that includes the round number
+            # Add tracking information
             barcode = f"R{round_num}-GEN-{idx+1:04d}"
-            compound["barcode"] = barcode
-            compound["generation"] = str(round_num)
-            compound["round"] = round_num
-        
-        # Step 3: Run retrosynthesis on ALL compounds, not just top_n
-        round_variants = []
-        
-        for idx, compound in enumerate(compounds):
+            compound.update({
+                "barcode": barcode,
+                "generation": str(round_num),
+                "round": round_num,
+                "status": "GENERATED",
+                "source": "AI_GENERATION",
+                "parent_id": "NONE"
+            })
+            
+            # Update both round and master tracking reports
+            update_tracking_report(round_report, compound, "compound")
+            update_tracking_report(master_report, compound, "compound")
+            
+            # Run retrosynthesis
             cid = compound["compound_id"]
             smiles = compound["smiles"]
-            barcode = compound["barcode"]
+            logger.info(f"Round {round_num}: Processing compound {idx+1}/{len(compounds)}: {cid}")
             
-            logger.info(f"Round {round_num}: Running retrosynthesis on compound {idx+1}/{len(compounds)}: {cid} (Barcode: {barcode})")
-            
-            # Create output file for retrosynthesis results
             retro_output = retro_dir / f"{cid}_retrosyn.csv"
-            
-            # Run retrosynthesis with a 5-minute timeout
             success = run_retrosynthesis_with_timeout(smiles, retro_output, timeout=300)
             
             if success:
-                logger.info(f"Round {round_num}: Retrosynthesis completed for {cid}")
-                
-                # Extract variants from retrosynthesis results (top max_variants for each compound)
                 variants = extract_variants_from_retrosynthesis(retro_output, max_variants=max_variants)
                 
-                # Add source compound information and barcodes to each variant
+                # Process each variant
                 for vidx, variant in enumerate(variants):
-                    # Barcode format: R{round_num}-{Source Barcode}-V-{Variant Number}
                     variant_barcode = f"R{round_num}-{barcode}-V-{vidx+1:02d}"
+                    variant.update({
+                        "source_compound": cid,
+                        "source_smiles": smiles,
+                        "barcode": variant_barcode,
+                        "generation": str(round_num + 1),
+                        "round": round_num,
+                        "status": "SYNTHETIZED",
+                        "source": "RETROSYNTHESIS"
+                    })
                     
-                    variant["source_compound"] = cid
-                    variant["source_smiles"] = smiles
-                    variant["barcode"] = variant_barcode
-                    variant["generation"] = str(round_num + 1)  # Generation = round + 1
-                    variant["round"] = round_num
-                
-                round_variants.extend(variants)
-            else:
-                logger.warning(f"Round {round_num}: Retrosynthesis failed for {cid}")
-        
-        if not round_variants:
-            logger.error(f"Round {round_num}: No variants generated from retrosynthesis. Skipping this round.")
-            continue
-        
-        logger.info(f"Round {round_num}: Total of {len(round_variants)} variants extracted from retrosynthesis")
-        
-        # Step 4: Apply MedChem filtering to variants
-        filtered_variants = apply_medchem_filtering_to_variants(round_variants, filter_dir)
-        
-        if not filtered_variants:
-            logger.warning(f"Round {round_num}: No variants passed MedChem filtering. Skipping this round.")
-            continue
-        
-        logger.info(f"Round {round_num}: After MedChem filtering, {len(filtered_variants)} variants remain")
-        
-        # Save filtered variants to SDF for reference
-        filtered_sdf = filter_dir / f"round_{round_num}_filtered_variants.sdf"
-        smiles_to_sdf(filtered_variants, filtered_sdf)
-        
-        # Step 5: Redock filtered variants
-        logger.info(f"Round {round_num}: Redocking {len(filtered_variants)} filtered variants...")
-        
-        # Prepare redocking parameters
-        center_x, center_y, center_z = center
-        size_x, size_y, size_z = box_size
-        
-        redock_params = (
-            program_choice,
-            scoring_function,
-            center_x, center_y, center_z,
-            size_x, size_y, size_z,
-            exhaustiveness,
-            is_selfies,
-            is_peptide
-        )
-        
-        # Create a directory for each variant's docking results
-        round_redock_results = []
-        for variant in filtered_variants:
-            variant_id = variant["variant_id"]
-            smiles = variant["smiles"]
-            barcode = variant["barcode"]
-            parent_id = variant.get("parent_id", "unknown")
-            source_compound = variant.get("source_compound", "unknown")
-            
-            logger.info(f"Round {round_num}: Redocking variant: {variant_id} (Barcode: {barcode}, from {source_compound})")
-            
-            pose_out, rescored = redock_compound(
-                variant_id,
-                smiles,
-                redock_params,
-                receptor=receptor,
-                log_callback=logger.info
-            )
-            
-            round_redock_results.append({
-                "variant_id": variant_id,
-                "barcode": barcode,
-                "parent_id": parent_id,
-                "source_compound": source_compound,
-                "smiles": smiles,
-                "pose_pred_out": pose_out,
-                "re_scored_values": rescored,
-                "generation": variant.get("generation", str(round_num + 1)),
-                "round": round_num
-            })
-            
-            # Copy poses for this variant
-            vfu_outputs_dir = Path(vfu_dir) / "outputs"
-            variant_poses_dir = dock_dir / f"variant_{barcode}"
-            variant_poses_dir.mkdir(exist_ok=True)
-            
-            # Copy all files from VFU outputs to the variant-specific directory
-            for file_path in vfu_outputs_dir.glob("*"):
-                if file_path.is_file():
-                    shutil.copy2(file_path, variant_poses_dir)
-                elif file_path.is_dir():
-                    dest_dir = variant_poses_dir / file_path.name
-                    if dest_dir.exists():
-                        shutil.rmtree(dest_dir)
-                    shutil.copytree(file_path, dest_dir)
-            
-            logger.info(f"Round {round_num}: Copied poses for variant {barcode} to {variant_poses_dir}")
-        
-        # Save results to CSV for this round
-        if round_redock_results:
-            results_df = pd.DataFrame(round_redock_results)
-            results_csv = dock_dir / f"round_{round_num}_docking_results.csv"
-            results_df.to_csv(results_csv, index=False)
-            logger.info(f"Round {round_num}: Docking results saved to: {results_csv}")
-            
-            # Create top_n results for this round
-            if len(results_df) > top_n and 'pose_pred_out' in results_df.columns:
-                try:
-                    # Extract best docking score and pose number for each compound
-                    results_df[['docking_score', 'best_pose']] = results_df['pose_pred_out'].apply(
-                        lambda x: pd.Series(extract_best_pose_and_score(x))
-                    )
+                    # Update tracking with variant
+                    update_tracking_report(round_report, variant, "variant")
+                    update_tracking_report(master_report, variant, "variant")
                     
-                    # Filter out rows with None docking scores
-                    filtered_results = results_df.dropna(subset=['docking_score'])
-                    
-                    if len(filtered_results) > 0:
-                        # Sort by docking score (lower is better) and select top_n unique compounds
-                        top_results = filtered_results.sort_values('docking_score').head(top_n)
-                        top_results_csv = dock_dir / f"round_{round_num}_top_{top_n}_results.csv"
-                        top_results.to_csv(top_results_csv, index=False)
-                        logger.info(f"Round {round_num}: Top {top_n} results saved to: {top_results_csv}")
-                    else:
-                        logger.warning(f"Round {round_num}: No valid docking scores found after filtering")
-                except Exception as e:
-                    logger.error(f"Round {round_num}: Error selecting top results: {e}")
+                    # Apply MedChem filtering
+                    if apply_medchem_filtering_to_variants([variant], filter_dir):
+                        # Update variant status
+                        variant["status"] = "FILTERED_PASS"
+                        update_tracking_report(round_report, variant, "variant")
+                        update_tracking_report(master_report, variant, "variant")
+                        
+                        # Perform docking
+                        center_x, center_y, center_z = center
+                        size_x, size_y, size_z = box_size
+                        redock_params = (
+                            program_choice, scoring_function,
+                            center_x, center_y, center_z,
+                            size_x, size_y, size_z,
+                            exhaustiveness, is_selfies, is_peptide
+                        )
+                        
+                        pose_out, rescored = redock_compound(
+                            variant["variant_id"],
+                            variant["smiles"],
+                            redock_params,
+                            receptor=receptor,
+                            log_callback=logger.info
+                        )
+                        
+                        if pose_out:
+                            # Extract docking information
+                            best_score, best_pose = extract_best_pose_and_score(pose_out)
+                            
+                            # Update variant with docking results
+                            variant.update({
+                                "status": "DOCKED",
+                                "docking_score": best_score,
+                                "best_pose": best_pose,
+                                "pose_pred_out": pose_out,
+                                "re_scored_values": rescored
+                            })
+                            
+                            # Update tracking with docking results
+                            update_tracking_report(round_report, variant, "docking")
+                            update_tracking_report(master_report, variant, "docking")
+                            
+                            # Copy docking outputs
+                            variant_poses_dir = dock_dir / f"variant_{variant_barcode}"
+                            variant_poses_dir.mkdir(exist_ok=True)
+                            vfu_outputs_dir = Path(vfu_dir) / "outputs"
+                            
+                            for file_path in vfu_outputs_dir.glob("*"):
+                                if file_path.is_file():
+                                    shutil.copy2(file_path, variant_poses_dir)
+                                elif file_path.is_dir():
+                                    dest_dir = variant_poses_dir / file_path.name
+                                    if dest_dir.exists():
+                                        shutil.rmtree(dest_dir)
+                                    shutil.copytree(file_path, dest_dir)
             
-            # Generate round-specific tracking report
-            logger.info(f"Round {round_num}: Generating compound tracking report...")
-            generate_tracking_report(compounds, round_variants, round_redock_results, round_dir)
-            
-            # Add this round's results to the master lists
-            all_compounds_across_rounds.extend(compounds)
-            all_variants_across_rounds.extend(round_variants)
-            all_redock_results_across_rounds.extend(round_redock_results)
-            
-        else:
-            logger.warning(f"Round {round_num}: No docking results to save.")
-        
         logger.info(f"============= COMPLETED ROUND {round_num}/{num_rounds} =============")
-
-    # After all rounds are complete, generate a master tracking report
-    if all_compounds_across_rounds:
-        logger.info("Generating master compound tracking report across all rounds...")
-        master_report = generate_tracking_report(
-            all_compounds_across_rounds, 
-            all_variants_across_rounds, 
-            all_redock_results_across_rounds, 
-            master_dir
-        )
-        
-        # Rename the master report to make it clear it's across all rounds
-        if master_report is not None:
-            master_csv = master_dir / "master_compound_tracking_report.csv"
-            # Rename the default filename to the master filename
-            Path(master_dir / "compound_tracking_report.csv").rename(master_csv)
-            logger.info(f"Master compound tracking report saved to: {master_csv}")
     
     logger.info(f"Multi-round quick pipeline completed successfully. Total rounds: {num_rounds}")
 

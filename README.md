@@ -6,6 +6,27 @@ A comprehensive modular system for computational drug discovery using generative
 
 This project integrates cutting-edge machine learning and computational chemistry to enable accelerated structure-based drug design (SBDD). The pipeline combines generative models for de novo molecule creation, retrosynthetic analysis, medicinal chemistry filtering, and automated molecular docking to identify promising drug candidates.
 
+## Project Structure
+
+```
+.
+├── src/                    # External dependencies
+│   ├── DiffSBDD/          # Diffusion-based generative model
+│   ├── Synformer/         # Retrosynthesis analysis
+│   └── VFU/               # Virtual Flow Unity for docking
+├── utils/                  # Utility functions
+│   ├── __init__.py        # Package initialization
+│   ├── ligand_generation.py
+│   ├── retrosynformer.py
+│   ├── medchem_filter.py
+│   ├── energy_minimization.py
+│   ├── dock_synformer_compounds.py
+│   ├── pose_evaluation.py
+│   └── redocking.py
+├── pipeline.py            # Standard pipeline script
+└── pipeline_quick_multiround.py  # Multi-round quick pipeline
+```
+
 ## Key Features
 
 - **AI-Powered Ligand Generation**: Uses DiffSBDD, a diffusion-based generative model to create novel molecules tailored to specific protein binding sites
@@ -13,15 +34,17 @@ This project integrates cutting-edge machine learning and computational chemistr
 - **Medicinal Chemistry Filters**: Applies drug-likeness and toxicity filters to prioritize promising compounds
 - **Molecular Docking**: Supports multiple docking engines with automated pose generation and scoring
 - **Multi-round Capability**: Supports iterative workflows for compound refinement across multiple rounds
-- **Comprehensive Tracking**: Tracks compounds throughout the pipeline for full provenance and analysis
+- **Real-time Tracking**: Monitors compound progression through the pipeline with detailed status updates
+- **Comprehensive Tracking**: Tracks compounds throughout the pipeline with timestamps and status changes:
+  - Generation
+  - Retrosynthesis
+  - MedChem Filtering
+  - Docking
 - **Modular Architecture**: Easily extendable with new components or custom modifications
 
 ## Pipeline Workflows
 
-The project offers multiple workflows to accommodate different research needs:
-
 ### Standard Pipeline (`pipeline.py`)
-
 Complete workflow with all analysis steps:
 1. Ligand Generation
 2. Energy Minimization (for multiple-ligand mode)
@@ -29,36 +52,27 @@ Complete workflow with all analysis steps:
 4. Optional MedChem Filtering
 5. Redocking
 
-### Quick Pipeline (`pipeline_quick.py`)
-
-Streamlined workflow for faster results:
+### Quick Multi-round Pipeline (`pipeline_quick_multiround.py`)
+Streamlined workflow for iterative exploration:
 1. Ligand Generation
-2. Conversion to SMILES
+2. Convert to SMILES
 3. Retrosynthesis Analysis
 4. Variant Extraction
 5. MedChem Filtering
 6. Redocking
-
-### Multi-round Pipeline (`pipeline_quick_multiround.py`)
-
-Iterative exploration with multiple rounds of compound generation and analysis:
-- Supports multiple sequential rounds
-- Maintains compounds across rounds with unique barcoding
-- Generates master reports aggregating data from all rounds
+7. Real-time Progress Tracking
 
 ## Installation
 
 ### Prerequisites
-
 - Linux-based operating system (Ubuntu 20.04+ recommended)
 - CUDA-capable GPU (for accelerated model inference)
 - Anaconda or Miniconda
 
 ### Environment Setup
-
 1. Clone the repository:
 ```bash
-git clone XXX
+git clone <repository_url>
 cd denovo-drug-discovery
 ```
 
@@ -71,20 +85,15 @@ conda activate sbdd-env-exp
 ## Usage
 
 ### Basic Usage
-
 ```bash
 # Run standard pipeline
 python pipeline.py --out_dir output
 
-# Run quick pipeline (1 round)
-python pipeline_quick.py --out_dir output
-
 # Run multi-round pipeline
-python pipeline_quick_multiround.py --out_dir output --num_rounds 3 --n_samples 100
+python pipeline_quick_multiround.py --out_dir output --num_rounds 3
 ```
 
 ### Key Parameters
-
 - `--out_dir`: Directory for all output files (required)
 - `--checkpoint`: Path to DiffSBDD checkpoint
 - `--pdbfile`: Input protein structure file
@@ -98,82 +107,39 @@ python pipeline_quick_multiround.py --out_dir output --num_rounds 3 --n_samples 
 - `--center`: Center coordinates for docking box
 - `--box_size`: Size of docking box
 - `--exhaustiveness`: Docking exhaustiveness
-- `--top_n`: Number of top compounds to select for analysis
 - `--num_rounds`: Number of rounds for multi-round pipeline
+- `--max_variants`: Maximum variants per compound for retrosynthesis
 
-### Example Workflow
-
-```bash
-# Generate compounds and perform full analysis
-python pipeline.py --out_dir results --checkpoint models/diffsbdd_model.pt \
-  --pdbfile input/target_protein.pdb --resi_list "A:28 A:29 A:30" \
-  --n_samples 100 --sanitize --program_choice "qvina" \
-  --center 114.817 75.602 82.416 --box_size 38 70 58
+### Output Structure
+```
+output/
+├── master_tracking/              # Master tracking across all rounds
+│   └── master_compound_tracking_report.csv
+├── round_1/                      # Round-specific directories
+│   ├── tracking_report.csv       # Round-specific tracking
+│   ├── ligand_generation/       
+│   ├── retrosyn_results/
+│   ├── filter_results/
+│   └── docking_results/
+└── round_N/                      # Subsequent rounds...
 ```
 
-## Module Descriptions
-
-- **DiffSBDD/**: Diffusion-based generative model for 3D molecule generation
-- **synformer/**: Transformer-based model for retrosynthetic analysis
-- **VFU/**: Virtual Flow Unity docking toolkit
-- **ligand_generation.py**: Interface to DiffSBDD for molecule generation
-- **retrosynformer.py**: Interface to Synformer for retrosynthetic analysis
-- **medchem_filter.py**: Implementation of medicinal chemistry filters
-- **energy_minimization.py**: Energy minimization and conformer generation
-- **pose_evaluation.py**: Evaluation of docking poses
-- **redocking.py**: Interface to docking engines
-- **dock_synformer_compounds.py**: Specialized docking for Synformer compounds
-
-## Directory Structure
-
-The pipeline creates the following directory structure for output:
-
-```
-output_dir/
-├── ligands/           # Generated ligands (SDF format)
-├── minimized/         # Energy-minimized structures
-├── eval/              # Pose evaluation results
-├── retro/             # Retrosynthesis results
-├── variants/          # Extracted retrosynthesis variants
-├── filtered/          # Compounds after MedChem filtering
-├── redock/            # Redocking results and poses
-└── tracking/          # Tracking reports and analysis
-```
-
-## Code Style Guidelines
-
-- **Imports**: Standard library imports first, then third-party packages, finally local modules
-- **Formatting**: 4-space indentation, 120 character line limit
-- **Types**: Use type hints in function signatures (Python 3.10 compatible)
-- **Naming**: 
-  - snake_case for functions, variables, and modules
-  - CamelCase for classes
-  - UPPER_CASE for constants
-- **Error handling**: Use try/except blocks with specific exception types
-- **Logging**: Use the Python logging module with appropriate log levels
-- **Documentation**: Docstrings in triple quotes, with function parameters documented
-
-## External Packages
-
-**IMPORTANT**: Do not modify files in the external packages (VFU, DiffSBDD, and synformer) as they are essential external components of the pipeline, and modifications risk reproducibility.
-
-## Testing
-
-
-## Citation
-
-If you use this pipeline in your research, please cite the following works:
-
-[List of relevant papers and their citations]
-
-## License
-
-[Appropriate license information]
+## Tracking Reports
+The pipeline generates detailed tracking reports that include:
+- Compound IDs and barcodes
+- Generation timestamps
+- Processing status
+- Source information
+- Docking scores and poses
+- Parent-child relationships for variants
 
 ## Contributing
+Contributions are welcome! Please read our contributing guidelines and code of conduct.
 
-Guidelines for contributing to the project, including code style, testing requirements, and pull request process.
+## License
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Acknowledgments
-
-This project builds upon several open-source tools and research. We gratefully acknowledge their contributions. 
+- DiffSBDD team for the generative model
+- Synformer team for retrosynthesis capabilities
+- Virtual Flow Unity (VFU) team for docking infrastructure 
