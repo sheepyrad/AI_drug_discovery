@@ -38,8 +38,11 @@ venv.bak/
 
 # Jupyter Notebook
 .ipynb_checkpoints
-*.ipynb_checkpoints/
-*.ipynb
+**/.ipynb_checkpoints/
+notebooks/*
+!notebooks/validation.ipynb
+!notebooks/screen_test.ipynb
+!notebooks/tanimoto_similarity_visualization.ipynb
 
 # Temporary files
 temp/

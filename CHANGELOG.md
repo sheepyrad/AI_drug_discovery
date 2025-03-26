@@ -1,5 +1,20 @@
 # Changelog
 
+## [2024-03-26] Notebook Organization
+
+### Added
+- Created dedicated `notebooks/` directory for Jupyter notebooks
+
+### Moved
+- Relocated notebooks to the new directory:
+  - validation.ipynb
+  - tanimoto_similarity_visualization.ipynb
+  - screen_test.ipynb
+
+### Modified
+- Updated .gitignore to handle notebooks in their new location
+- Added specific exceptions to track important notebooks
+
 ## [2024-03-13] Real-time Tracking Implementation
 
 ### Added
