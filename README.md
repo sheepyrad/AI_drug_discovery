@@ -1,145 +1,133 @@
-# De Novo Drug Discovery Pipeline
+# Drug Discovery Pipeline Streamlit Application
 
-A comprehensive modular system for computational drug discovery using generative models, retrosynthesis, and molecular docking.
+A web-based interface for running and monitoring the drug discovery pipeline, built with Streamlit.
 
-## Overview
+## Features
 
-This project integrates cutting-edge machine learning and computational chemistry to enable accelerated structure-based drug design (SBDD). The pipeline combines generative models for de novo molecule creation, retrosynthetic analysis, medicinal chemistry filtering, and automated molecular docking to identify promising drug candidates.
-
-## Project Structure
-
-```
-.
-├── src/                    # External dependencies
-│   ├── DiffSBDD/          # Diffusion-based generative model
-│   ├── Synformer/         # Retrosynthesis analysis
-│   └── VFU/               # Virtual Flow Unity for docking
-├── utils/                  # Utility functions
-│   ├── __init__.py        # Package initialization
-│   ├── ligand_generation.py
-│   ├── retrosynformer.py
-│   ├── medchem_filter.py
-│   ├── energy_minimization.py
-│   ├── dock_synformer_compounds.py
-│   ├── pose_evaluation.py
-│   └── redocking.py
-├── pipeline.py            # Standard pipeline script
-└── pipeline_quick_multiround.py  # Multi-round quick pipeline
-```
-
-## Key Features
-
-- **AI-Powered Ligand Generation**: Uses DiffSBDD, a diffusion-based generative model to create novel molecules tailored to specific protein binding sites
-- **Retrosynthetic Analysis**: Implements Synformer to evaluate synthetic accessibility and generate plausible synthesis routes
-- **Medicinal Chemistry Filters**: Applies drug-likeness and toxicity filters to prioritize promising compounds
-- **Molecular Docking**: Supports multiple docking engines with automated pose generation and scoring
-- **Multi-round Capability**: Supports iterative workflows for compound refinement across multiple rounds
-- **Real-time Tracking**: Monitors compound progression through the pipeline with detailed status updates
-- **Comprehensive Tracking**: Tracks compounds throughout the pipeline with timestamps and status changes:
-  - Generation
-  - Retrosynthesis
-  - MedChem Filtering
-  - Docking
-- **Modular Architecture**: Easily extendable with new components or custom modifications
-
-## Pipeline Workflows
-
-### Standard Pipeline (`pipeline.py`)
-Complete workflow with all analysis steps:
-1. Ligand Generation
-2. Energy Minimization (for multiple-ligand mode)
-3. Pose Evaluation (concatenation + PoseBuster filtering)
-4. Optional MedChem Filtering
-5. Redocking
-
-### Quick Multi-round Pipeline (`pipeline_quick_multiround.py`)
-Streamlined workflow for iterative exploration:
-1. Ligand Generation
-2. Convert to SMILES
-3. Retrosynthesis Analysis
-4. Variant Extraction
-5. MedChem Filtering
-6. Redocking
-7. Real-time Progress Tracking
+- **Interactive Configuration**: Easy-to-use interface for setting up pipeline parameters
+- **Real-time Monitoring**: Track pipeline progress and view logs in real-time
+- **Results Visualization**: 
+  - 2D and 3D molecular structure visualization
+  - Interactive plots and charts
+  - Comprehensive results dashboard
+- **Data Export**: Export results in various formats (CSV, statistics)
 
 ## Installation
 
-### Prerequisites
-- Linux-based operating system (Ubuntu 20.04+ recommended)
-- CUDA-capable GPU (for accelerated model inference)
-- Anaconda or Miniconda
-
-### Environment Setup
 1. Clone the repository:
 ```bash
-git clone <repository_url>
-cd denovo-drug-discovery
+git clone https://github.com/yourusername/drug_pipeline_app.git
+cd drug_pipeline_app
 ```
 
-2. Create and activate the conda environment:
+2. Create a virtual environment (recommended):
 ```bash
-conda env create -f environment.yml
-conda activate sbdd-env-exp
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
 ```
 
 ## Usage
 
-### Basic Usage
+1. Start the Streamlit application:
 ```bash
-# Run standard pipeline
-python pipeline.py --out_dir output
-
-# Run multi-round pipeline
-python pipeline_quick_multiround.py --out_dir output --num_rounds 3
+streamlit run app.py
 ```
 
-### Key Parameters
-- `--out_dir`: Directory for all output files (required)
-- `--checkpoint`: Path to DiffSBDD checkpoint
-- `--pdbfile`: Input protein structure file
-- `--resi_list`: List of residues defining the binding site
-- `--n_samples`: Number of ligands to generate
-- `--sanitize`: Apply RDKit sanitization to generated molecules
-- `--protein_file`: Prepared protein file for docking
-- `--receptor`: Path to receptor file
-- `--program_choice`: Docking program to use (default: "qvina")
-- `--scoring_function`: Scoring function (default: "nnscore2")
-- `--center`: Center coordinates for docking box
-- `--box_size`: Size of docking box
-- `--exhaustiveness`: Docking exhaustiveness
-- `--num_rounds`: Number of rounds for multi-round pipeline
-- `--max_variants`: Maximum variants per compound for retrosynthesis
+2. Open your web browser and navigate to the URL shown in the terminal (usually http://localhost:8501)
 
-### Output Structure
+3. Follow these steps in the application:
+
+   a. **Configuration**:
+      - Upload required files (PDB, checkpoint)
+      - Set pipeline parameters
+      - Configure docking settings
+
+   b. **Execution**:
+      - Start the pipeline
+      - Monitor progress
+      - View real-time logs
+
+   c. **Results**:
+      - View generated compounds
+      - Analyze docking results
+      - Export data
+
+## Application Structure
+
 ```
-output/
-├── master_tracking/              # Master tracking across all rounds
-│   └── master_compound_tracking_report.csv
-├── round_1/                      # Round-specific directories
-│   ├── tracking_report.csv       # Round-specific tracking
-│   ├── ligand_generation/       
-│   ├── retrosyn_results/
-│   ├── filter_results/
-│   └── docking_results/
-└── round_N/                      # Subsequent rounds...
+drug_pipeline_app/
+├── app.py                 # Main application file
+├── pages/                 # Streamlit pages
+│   ├── 01_configuration.py
+│   ├── 02_execution.py
+│   ├── 03_results.py
+├── pipeline_quick_multiround.py  # Pipeline implementation
+├── requirements.txt       # Python dependencies
+└── README.md             # This file
 ```
 
-## Tracking Reports
-The pipeline generates detailed tracking reports that include:
-- Compound IDs and barcodes
-- Generation timestamps
-- Processing status
-- Source information
-- Docking scores and poses
-- Parent-child relationships for variants
+## Requirements
+
+- Python 3.8+
+- CUDA-capable GPU (recommended for optimal performance)
+- Dependencies listed in requirements.txt
+
+## Environment Variables
+
+The following environment variables can be set:
+
+- `CUDA_VISIBLE_DEVICES`: GPU device indices to use
+- `STREAMLIT_SERVER_PORT`: Custom port for the Streamlit server
+- `STREAMLIT_SERVER_ADDRESS`: Custom address for the Streamlit server
+
+## Troubleshooting
+
+Common issues and solutions:
+
+1. **GPU Not Detected**:
+   - Ensure CUDA drivers are installed
+   - Check CUDA_VISIBLE_DEVICES environment variable
+
+2. **Memory Issues**:
+   - Reduce the number of samples
+   - Lower the exhaustiveness parameter
+   - Clear browser cache
+
+3. **File Upload Issues**:
+   - Check file size limits
+   - Verify file formats
+   - Ensure proper file permissions
 
 ## Contributing
-Contributions are welcome! Please read our contributing guidelines and code of conduct.
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
+
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Acknowledgments
-- DiffSBDD team for the generative model
-- Synformer team for retrosynthesis capabilities
-- Virtual Flow Unity (VFU) team for docking infrastructure 
+## Citation
+
+If you use this software in your research, please cite:
+
+```bibtex
+@software{drug_pipeline_app,
+  author = {Your Name},
+  title = {Drug Discovery Pipeline Application},
+  year = {2024},
+  url = {https://github.com/yourusername/drug_pipeline_app}
+}
+```
+
+## Contact
+
+For support or questions, please open an issue on the GitHub repository or contact [your@email.com]. 

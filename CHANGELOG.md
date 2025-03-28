@@ -84,6 +84,5 @@ The following scripts remain in the root directory:
 - This restructuring improves project organization by:
   - Separating external dependencies from internal code
   - Grouping utility functions in a dedicated directory
-  - Keeping main pipeline scripts easily accessible in the root directory
   - Making the utils directory a proper Python package
 - All utility scripts have been updated to properly reference external packages in their new location under src/ 

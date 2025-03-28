@@ -13,7 +13,7 @@ import shutil
 import os
 
 # Import the redocking function
-from redocking import redock_compound, vfu_dir
+from .redocking import redock_compound, vfu_dir
 
 logger = logging.getLogger(__name__)
 

@@ -33,6 +33,10 @@ import queue
 import threading
 import json
 from datetime import datetime
+from typing import List
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
 
 # Set up thread-safe logging with QueueHandler and QueueListener
 class ThreadSafeRotatingFileHandler(logging.FileHandler):
@@ -53,30 +57,6 @@ class ThreadSafeRotatingFileHandler(logging.FileHandler):
                     super().emit(record)
                 except Exception:
                     self.handleError(record)
-
-# Create a queue for thread-safe logging
-log_queue = queue.Queue(-1)  # No limit on size
-
-# Configure the root logger with queue handler
-root_logger = logging.getLogger()
-root_logger.setLevel(logging.INFO)
-
-# Create handlers
-console_handler = logging.StreamHandler(sys.stdout)
-file_handler = ThreadSafeRotatingFileHandler("quick_pipeline.log", mode="w")
-
-# Set formatter
-formatter = logging.Formatter("[%(asctime)s] %(name)s - %(levelname)s - %(message)s")
-console_handler.setFormatter(formatter)
-file_handler.setFormatter(formatter)
-
-# Add handlers to root logger
-root_logger.addHandler(console_handler)
-root_logger.addHandler(file_handler)
-
-# Get logger for this module
-logger = logging.getLogger(__name__)
-logger.info("Starting quick pipeline...")
 
 # Import functions from the utils modules
 from utils.ligand_generation import run_ligand_generation
@@ -240,84 +220,54 @@ def apply_medchem_filtering_to_variants(variants, output_dir):
     Returns:
         List of filtered variants
     """
-    # Create a temporary SDF file with all variants
-    temp_sdf = output_dir / "temp_variants_for_filtering.sdf"
-    smiles_to_sdf(variants, temp_sdf)
-    
+    if not variants:
+        logger.warning("No variants provided for filtering")
+        return []
+
     try:
+        # Create a temporary SDF file with all variants
+        temp_sdf = output_dir / "temp_variants_for_filtering.sdf"
+        if not smiles_to_sdf(variants, temp_sdf):
+            logger.error("Failed to create temporary SDF file for filtering")
+            return []
+        
         # Apply MedChem filtering
         logger.info(f"Applying MedChem filtering to {len(variants)} variants...")
         filtered_df = generative_filter(temp_sdf, output_folder=output_dir)
         
-        if filtered_df.empty:
+        if filtered_df is None or filtered_df.empty:
             logger.warning("No variants passed MedChem filtering")
             return []
         
-        # Create a list of filtered variants
+        # Create a mapping of SMILES to original variant data
+        smiles_to_variant = {v['smiles']: v for v in variants}
+        
+        # Create a list for filtered variants
         filtered_variants = []
         
-        # Log the column names to help with debugging
-        logger.info(f"Filtered dataframe columns: {filtered_df.columns.tolist()}")
+        # Check if SMILES column exists in filtered results
+        smiles_col = None
+        for possible_col in ['SMILES', 'smiles', 'canonical_smiles']:
+            if possible_col in filtered_df.columns:
+                smiles_col = possible_col
+                break
         
-        # Determine which column contains the variant ID
-        id_column = None
-        if 'Name' in filtered_df.columns:
-            id_column = 'Name'
-        elif 'compound_id' in filtered_df.columns:
-            id_column = 'compound_id'
-        else:
-            # If neither column exists, log the issue and return empty list
-            logger.error(f"Could not find Name or compound_id column in filtered results. Available columns: {filtered_df.columns.tolist()}")
+        if not smiles_col:
+            logger.error(f"Could not find SMILES column in filtered results. Available columns: {filtered_df.columns.tolist()}")
             return []
-            
-        logger.info(f"Using '{id_column}' column to match filtered variants")
         
-        # Create a dictionary for faster lookup of original variants
-        variant_lookup = {
-            v.get('variant_id', ''): v for v in variants
-        }
-        
-        # Also try matching by barcode if exists
-        barcode_lookup = {}
-        for v in variants:
-            if 'barcode' in v:
-                barcode_lookup[v['barcode']] = v
-        
+        # Match filtered compounds back to original variants
         for _, row in filtered_df.iterrows():
-            # Find the original variant info using the identified column
-            variant_id = row[id_column]
-            
-            # Log the variant ID for debugging
-            logger.info(f"Looking for variant with ID: {variant_id}")
-            
-            # First, try direct lookup by variant_id
-            original_variant = variant_lookup.get(variant_id)
-            
-            # If not found, try other methods
-            if not original_variant:
-                # Try matching by barcode if available
-                if 'BARCODE' in filtered_df.columns:
-                    barcode = row['BARCODE']
-                    original_variant = barcode_lookup.get(barcode)
-                
-                # If still not found, try iterating through variants
-                if not original_variant:
-                    for v in variants:
-                        # Check if any ID field matches
-                        for key, value in v.items():
-                            if key.endswith('_id') and value == variant_id:
-                                original_variant = v
-                                break
-                        if original_variant:
-                            break
-            
-            if original_variant:
-                logger.info(f"Found matching variant: {original_variant.get('variant_id', 'unknown')} (Barcode: {original_variant.get('barcode', 'unknown')})")
-                filtered_variants.append(original_variant)
-            else:
-                logger.warning(f"Could not find original variant for {variant_id}")
+            smiles = row[smiles_col]
+            if smiles in smiles_to_variant:
+                variant = smiles_to_variant[smiles]
+                # Add any additional properties from filtering if needed
+                if 'filter_score' in row:
+                    variant['filter_score'] = row['filter_score']
+                filtered_variants.append(variant)
+                logger.debug(f"Matched filtered variant: {variant.get('variant_id', 'unknown')} (Barcode: {variant.get('barcode', 'unknown')})")
         
-        logger.info(f"After MedChem filtering, {len(filtered_variants)} variants remain")
+        logger.info(f"MedChem filtering complete: {len(filtered_variants)} variants passed filtering out of {len(variants)}")
         return filtered_variants
     
     except Exception as e:
@@ -326,8 +276,11 @@ def apply_medchem_filtering_to_variants(variants, output_dir):
     
     finally:
         # Clean up temporary files
-        if temp_sdf.exists():
-            temp_sdf.unlink()
+        if 'temp_sdf' in locals() and temp_sdf.exists():
+            try:
+                temp_sdf.unlink()
+            except Exception as e:
+                logger.warning(f"Failed to delete temporary SDF file: {e}")
 
 def generate_tracking_report(compounds, variants, redock_results, out_dir):
     """
@@ -560,37 +513,64 @@ def update_tracking_report(report_file, new_data, report_type="compound"):
     except Exception as e:
         logger.error(f"Error updating tracking report: {e}")
 
-def main(out_dir, checkpoint, pdbfile, resi_list, n_samples, sanitize,
-         protein_file, receptor, program_choice="qvina", scoring_function="nnscore2",
-         center=(114.817, 75.602, 82.416), box_size=(38, 70, 58),
-         exhaustiveness=10, is_selfies=False, is_peptide=False, 
-         top_n=5, max_variants=5, num_rounds=1):
+def setup_logging(out_dir: Path) -> None:
     """
-    Multi-round quick pipeline main function.
+    Set up logging with both console and file output in the specified directory.
     
     Args:
-        out_dir: Output directory
-        checkpoint: Checkpoint file for ligand generation
-        pdbfile: PDB file for ligand generation
-        resi_list: Residue list for ligand generation
-        n_samples: Number of samples for ligand generation
-        sanitize: Whether to sanitize generated molecules
-        protein_file: Protein file for docking
-        receptor: Receptor file for docking
-        program_choice: Docking program choice
-        scoring_function: Scoring function for docking
-        center: Center coordinates for docking box
-        box_size: Box dimensions for docking
-        exhaustiveness: Exhaustiveness for docking
-        is_selfies: Whether to use SELFIES representation
-        is_peptide: Whether the ligand is a peptide
-        top_n: Number of top compounds to process (only used for final analysis)
-        max_variants: Maximum number of variants per compound for retrosynthesis
-        num_rounds: Number of rounds to run the pipeline (default: 1)
+        out_dir: Output directory path where logs will be stored
+    """
+    # Create logs directory
+    logs_dir = out_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Configure the root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    # Create handlers
+    console_handler = logging.StreamHandler(sys.stdout)
+    file_handler = ThreadSafeRotatingFileHandler(
+        str(logs_dir / "quick_pipeline.log"),
+        mode="w"
+    )
+    
+    # Set formatter
+    formatter = logging.Formatter("[%(asctime)s] %(name)s - %(levelname)s - %(message)s")
+    console_handler.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
+    
+    # Remove any existing handlers from both root and module logger
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+    
+    # Add handlers to root logger
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
+    
+    # Start logging
+    logger.info("Starting quick pipeline...")
+    logger.info(f"Logs will be saved to: {logs_dir}")
+
+def main(out_dir, checkpoint, pdbfile, resi_list, n_samples, sanitize,
+         receptor, program_choice="qvina", scoring_function="nnscore2",
+         center=(114.817, 75.602, 82.416), box_size=(38, 70, 58),
+         exhaustiveness=10, is_selfies=False, is_peptide=False, 
+         top_n=5, max_variants=5, num_rounds=1, stop_flag=None):
+    """
+    Multi-round quick pipeline main function with batch filtering optimization.
+    
+    Args:
+        stop_flag: Dictionary containing status information for stopping the pipeline
     """
     # Set up output directories
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Set up logging first
+    setup_logging(out_dir)
     
     # Create tracking report files
     master_dir = out_dir / "master_tracking"
@@ -599,31 +579,35 @@ def main(out_dir, checkpoint, pdbfile, resi_list, n_samples, sanitize,
     
     # Loop through each round
     for round_num in range(1, num_rounds + 1):
+        # Check if pipeline should stop
+        if stop_flag and not stop_flag.get("running", True):
+            logger.info("Pipeline stop requested. Stopping gracefully...")
+            break
+            
         logger.info(f"============= STARTING ROUND {round_num}/{num_rounds} =============")
         
-        # Create round-specific directory and report
+        # Create round-specific directories
         round_dir = out_dir / f"round_{round_num}"
         round_dir.mkdir(exist_ok=True)
         round_report = round_dir / f"round_{round_num}_tracking_report.csv"
         
-        # Set up round-specific subdirectories
         ligand_gen_dir = round_dir / "ligand_generation"
-        ligand_gen_dir.mkdir(exist_ok=True)
-        
         retro_dir = round_dir / "retrosyn_results"
-        retro_dir.mkdir(exist_ok=True)
-        
         dock_dir = round_dir / "docking_results"
-        dock_dir.mkdir(exist_ok=True)
-        
         filter_dir = round_dir / "filter_results"
-        filter_dir.mkdir(exist_ok=True)
+        
+        for dir_path in [ligand_gen_dir, retro_dir, dock_dir, filter_dir]:
+            dir_path.mkdir(exist_ok=True)
         
         # Step 1: Ligand Generation
         logger.info(f"Round {round_num}: Running ligand generation...")
         base_name = f"round_{round_num}"
         ligand_gen_out = ligand_gen_dir / f"{base_name}_mols_gen.sdf"
         
+        # Check stop flag before starting ligand generation
+        if stop_flag and not stop_flag.get("running", True):
+            break
+            
         lg_thread = run_ligand_generation(
             checkpoint=checkpoint,
             pdbfile=pdbfile,
@@ -635,16 +619,28 @@ def main(out_dir, checkpoint, pdbfile, resi_list, n_samples, sanitize,
         )
         lg_thread.join()
         
-        # Step 2: Process compounds and update tracking
+        # Check stop flag after ligand generation
+        if stop_flag and not stop_flag.get("running", True):
+            break
+            
+        # Step 2: Process compounds
         compounds = extract_smiles_from_sdf(ligand_gen_out)
         if not compounds:
             logger.error(f"Round {round_num}: No valid compounds generated. Skipping this round.")
             continue
+            
+        # Collect all variants for batch processing
+        all_variants = []
+        total_compounds = len(compounds)
         
-        # Process each compound and update tracking in real-time
-        for idx, compound in enumerate(compounds):
+        # Step 3: Sequential retrosynthesis (VRAM intensive)
+        for idx, compound in enumerate(compounds, 1):
+            # Check stop flag before each compound
+            if stop_flag and not stop_flag.get("running", True):
+                break
+                
             # Add tracking information
-            barcode = f"R{round_num}-GEN-{idx+1:04d}"
+            barcode = f"R{round_num}-GEN-{idx:04d}"
             compound.update({
                 "barcode": barcode,
                 "generation": str(round_num),
@@ -654,14 +650,14 @@ def main(out_dir, checkpoint, pdbfile, resi_list, n_samples, sanitize,
                 "parent_id": "NONE"
             })
             
-            # Update both round and master tracking reports
+            # Update tracking reports
             update_tracking_report(round_report, compound, "compound")
             update_tracking_report(master_report, compound, "compound")
             
             # Run retrosynthesis
             cid = compound["compound_id"]
             smiles = compound["smiles"]
-            logger.info(f"Round {round_num}: Processing compound {idx+1}/{len(compounds)}: {cid}")
+            logger.info(f"Round {round_num}: Running retrosynthesis {idx}/{total_compounds}: {cid}")
             
             retro_output = retro_dir / f"{cid}_retrosyn.csv"
             success = run_retrosynthesis_with_timeout(smiles, retro_output, timeout=300)
@@ -669,7 +665,7 @@ def main(out_dir, checkpoint, pdbfile, resi_list, n_samples, sanitize,
             if success:
                 variants = extract_variants_from_retrosynthesis(retro_output, max_variants=max_variants)
                 
-                # Process each variant
+                # Add metadata to variants
                 for vidx, variant in enumerate(variants):
                     variant_barcode = f"R{round_num}-{barcode}-V-{vidx+1:02d}"
                     variant.update({
@@ -681,70 +677,115 @@ def main(out_dir, checkpoint, pdbfile, resi_list, n_samples, sanitize,
                         "status": "SYNTHETIZED",
                         "source": "RETROSYNTHESIS"
                     })
+                    all_variants.append(variant)
                     
-                    # Update tracking with variant
+                    # Update tracking for variant generation
                     update_tracking_report(round_report, variant, "variant")
                     update_tracking_report(master_report, variant, "variant")
-                    
-                    # Apply MedChem filtering
-                    if apply_medchem_filtering_to_variants([variant], filter_dir):
-                        # Update variant status
-                        variant["status"] = "FILTERED_PASS"
-                        update_tracking_report(round_report, variant, "variant")
-                        update_tracking_report(master_report, variant, "variant")
-                        
-                        # Perform docking
-                        center_x, center_y, center_z = center
-                        size_x, size_y, size_z = box_size
-                        redock_params = (
-                            program_choice, scoring_function,
-                            center_x, center_y, center_z,
-                            size_x, size_y, size_z,
-                            exhaustiveness, is_selfies, is_peptide
-                        )
-                        
-                        pose_out, rescored = redock_compound(
-                            variant["variant_id"],
-                            variant["smiles"],
-                            redock_params,
-                            receptor=receptor,
-                            log_callback=logger.info
-                        )
-                        
-                        if pose_out:
-                            # Extract docking information
-                            best_score, best_pose = extract_best_pose_and_score(pose_out)
-                            
-                            # Update variant with docking results
-                            variant.update({
-                                "status": "DOCKED",
-                                "docking_score": best_score,
-                                "best_pose": best_pose,
-                                "pose_pred_out": pose_out,
-                                "re_scored_values": rescored
-                            })
-                            
-                            # Update tracking with docking results
-                            update_tracking_report(round_report, variant, "docking")
-                            update_tracking_report(master_report, variant, "docking")
-                            
-                            # Copy docking outputs
-                            variant_poses_dir = dock_dir / f"variant_{variant_barcode}"
-                            variant_poses_dir.mkdir(exist_ok=True)
-                            vfu_outputs_dir = Path(vfu_dir) / "outputs"
-                            
-                            for file_path in vfu_outputs_dir.glob("*"):
-                                if file_path.is_file():
-                                    shutil.copy2(file_path, variant_poses_dir)
-                                elif file_path.is_dir():
-                                    dest_dir = variant_poses_dir / file_path.name
-                                    if dest_dir.exists():
-                                        shutil.rmtree(dest_dir)
-                                    shutil.copytree(file_path, dest_dir)
+        
+        # Check stop flag before batch filtering
+        if stop_flag and not stop_flag.get("running", True):
+            break
             
+        # Step 4: Batch filtering of all variants
+        logger.info(f"Round {round_num}: Starting batch filtering of {len(all_variants)} variants")
+        filtered_variants = apply_medchem_filtering_to_variants(all_variants, filter_dir)
+        
+        if not filtered_variants:
+            logger.warning(f"Round {round_num}: No variants passed MedChem filtering. Skipping this round.")
+            continue
+            
+        logger.info(f"Round {round_num}: After MedChem filtering, {len(filtered_variants)} variants remain")
+        
+        # Save filtered variants to SDF for reference
+        filtered_sdf = filter_dir / f"round_{round_num}_filtered_variants.sdf"
+        smiles_to_sdf(filtered_variants, filtered_sdf)
+        
+        # Update tracking for filtered variants
+        for variant in filtered_variants:
+            variant["status"] = "PASSFILTER"
+            update_tracking_report(round_report, variant, "variant")
+            update_tracking_report(master_report, variant, "variant")
+        
+        # Check stop flag before docking
+        if stop_flag and not stop_flag.get("running", True):
+            break
+            
+        # Step 5: Sequential docking (CPU intensive)
+        logger.info(f"Round {round_num}: Starting docking of {len(filtered_variants)} filtered variants")
+        
+        # Prepare docking parameters
+        center_x, center_y, center_z = center
+        size_x, size_y, size_z = box_size
+        redock_params = (
+            program_choice, scoring_function,
+            center_x, center_y, center_z,
+            size_x, size_y, size_z,
+            exhaustiveness, is_selfies, is_peptide
+        )
+        
+        # Create a directory for each variant's docking results
+        round_redock_results = []
+        for idx, variant in enumerate(filtered_variants, 1):
+            # Check stop flag before each docking
+            if stop_flag and not stop_flag.get("running", True):
+                break
+                
+            variant_id = variant["variant_id"]
+            smiles = variant["smiles"]
+            barcode = variant["barcode"]
+            
+            logger.info(f"Round {round_num}: Docking variant {idx}/{len(filtered_variants)}: {variant_id}")
+            
+            # Run docking
+            pose_out, rescored = redock_compound(
+                variant_id,
+                smiles,
+                redock_params,
+                receptor=receptor,
+                log_callback=logger.info
+            )
+            
+            if pose_out:
+                # Extract docking information
+                best_score, best_pose = extract_best_pose_and_score(pose_out)
+                
+                # Update variant with docking results
+                variant.update({
+                    "status": "DOCKED",
+                    "docking_score": best_score,
+                    "best_pose": best_pose,
+                    "pose_pred_out": pose_out,
+                    "re_scored_values": rescored
+                })
+                
+                round_redock_results.append(variant)
+                
+                # Update tracking with docking results
+                update_tracking_report(round_report, variant, "docking")
+                update_tracking_report(master_report, variant, "docking")
+                
+                # Save docking outputs
+                variant_poses_dir = dock_dir / f"variant_{barcode}"
+                variant_poses_dir.mkdir(exist_ok=True)
+                vfu_outputs_dir = Path(vfu_dir) / "outputs"
+                
+                for file_path in vfu_outputs_dir.glob("*"):
+                    if file_path.is_file():
+                        shutil.copy2(file_path, variant_poses_dir)
+                    elif file_path.is_dir():
+                        dest_dir = variant_poses_dir / file_path.name
+                        if dest_dir.exists():
+                            shutil.rmtree(dest_dir)
+                        shutil.copytree(file_path, dest_dir)
+        
+        logger.info(f"Round {round_num}: Successfully docked {len(round_redock_results)} variants")
         logger.info(f"============= COMPLETED ROUND {round_num}/{num_rounds} =============")
     
-    logger.info(f"Multi-round quick pipeline completed successfully. Total rounds: {num_rounds}")
+    if stop_flag and not stop_flag.get("running", True):
+        logger.info("Pipeline stopped by user request")
+    else:
+        logger.info(f"Multi-round quick pipeline completed successfully. Total rounds: {num_rounds}")
 
 if __name__ == "__main__":
     import argparse
@@ -754,8 +795,8 @@ if __name__ == "__main__":
     # Required parameters
     parser.add_argument("--out_dir", type=str, help="Output directory", required=True)
 
-    parser.add_argument("--checkpoint", type=str, default="DiffSBDD/checkpoints/crossdocked_fullatom_cond.ckpt",
-                        help="Path to the checkpoint file (default: DiffSBDD/checkpoints/crossdocked_fullatom_cond.ckpt)")
+    parser.add_argument("--checkpoint", type=str, default="src/DiffSBDD/checkpoints/crossdocked_fullatom_cond.ckpt",
+                        help="Path to the checkpoint file (default: src/DiffSBDD/checkpoints/crossdocked_fullatom_cond.ckpt)")
     
     parser.add_argument("--pdbfile", type=str, default="input/NS5.pdb",
                         help="Path to target protein PDB file")
@@ -763,9 +804,7 @@ if __name__ == "__main__":
     parser.add_argument("--resi_list", type=str, default="A:719 A:770 A:841 A:856 A:887 A:888",
                         help="Residue identifiers (space-separated)")
     
-    parser.add_argument("--protein_file", required=False, help="Protein file for docking", default="input/NS5_test.pdbqt")
-    
-    parser.add_argument("--receptor", required=False, help="Receptor file for docking", default="input/NS5_test.pdbqt")
+    parser.add_argument("--receptor", required=False, help="Receptor file for docking", default="NS5_test.pdbqt")
     
     # Optional parameters with defaults
     parser.add_argument("--n_samples", type=int, default=200, help="Number of samples to generate")
@@ -795,7 +834,6 @@ if __name__ == "__main__":
         args.resi_list,
         args.n_samples,
         args.sanitize,
-        args.protein_file,
         args.receptor,
         args.program_choice,
         args.scoring_function,

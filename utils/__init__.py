@@ -7,7 +7,7 @@ pose evaluation, redocking, and medicinal chemistry filtering.
 from .ligand_generation import run_ligand_generation
 from .energy_minimization_module import split_sdf_file, optimize_ligand, concatenate_sdf_files_sorted
 from .pose_evaluation import run_posebuster, extract_valid_ligands
-from .redocking import redock_compound
+from .redocking import redock_compound, vfu_dir
 from .medchem_filter import generative_filter, filter_compounds
 from .retrosynformer import run_retrosynthesis, process_redocking_results
 from .dock_synformer_compounds import dock_synformer_compounds
@@ -29,6 +29,7 @@ __all__ = [
     
     # Redocking
     'redock_compound',
+    'vfu_dir',
     
     # MedChem filtering
     'generative_filter',
