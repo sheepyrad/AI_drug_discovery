@@ -5,8 +5,8 @@ set -e
 
 # Define variables
 CONDA_ENV_NAME="sbdd_env"
-REPO_URL="https://github.com/sheepyrad/Drug_pipeline.git"
-REPO_DIR="Drug_pipeline"
+# REPO_URL="https://github.com/sheepyrad/Drug_pipeline.git" # Removed, assuming script is run inside repo
+# REPO_DIR="Drug_pipeline" # Removed, assuming script is run inside repo
 ENV_YAML="environment.yml"
 
 # --- Helper Functions ---
@@ -27,21 +27,21 @@ check_command() {
 # --- Main Setup Logic ---
 
 # 0. Check prerequisites
-echo_step "Checking prerequisites (git, conda, wget)"
-check_command git
+echo_step "Checking prerequisites (conda, wget)"
+# check_command git # Removed git check
 check_command conda
 check_command wget
 echo "Prerequisites found."
 
-# 1. Clone the repository
-echo_step "Cloning the repository from $REPO_URL"
-if [ -d "$REPO_DIR" ]; then
-    echo "Directory $REPO_DIR already exists. Skipping clone."
-else
-    git clone "$REPO_URL"
-fi
-cd "$REPO_DIR"
-echo "Changed directory to $(pwd)"
+# 1. Clone the repository (Removed)
+# echo_step "Cloning the repository from $REPO_URL" # Removed
+# if [ -d "$REPO_DIR" ]; then # Removed
+#     echo "Directory $REPO_DIR already exists. Skipping clone." # Removed
+# else # Removed
+#     git clone "$REPO_URL" # Removed
+# fi # Removed
+# cd "$REPO_DIR" # Removed
+# echo "Changed directory to $(pwd)" # Removed
 
 # 2. Create the conda environment
 echo_step "Creating conda environment '$CONDA_ENV_NAME' from $ENV_YAML"
