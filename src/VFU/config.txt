@@ -2,11 +2,11 @@ program_choice=qvina
 center_x=114.817
 center_y=75.602
 center_z=82.416
-size_x=38
-size_y=70
-size_z=58
+size_x=40
+size_y=40
+size_z=40
 exhaustiveness=32
-smi=C/C=C(\C)CS(=O)(=O)CCN1C(=O)NC(C)C1=O
+smi=COCC(C)C(C)C(=O)N1CC2(CN(CC(=O)OC)C(=O)O2)C1
 is_selfies=False
 is_peptide=False
 receptor=./config/NS5_test.pdbqt
