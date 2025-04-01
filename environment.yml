@@ -29,10 +29,12 @@ dependencies:
   - mdtraj
   - pdbfixer
   - openbabel
-  - biopython=1.79
+  - biopython=1.79 # Needs to be pinned to 1.79 
   - tqdm
   - requests
   - pyyaml
+  - imageio
+  - omegaconf
   - pip
   - pip:
     - posebusters >=0.3

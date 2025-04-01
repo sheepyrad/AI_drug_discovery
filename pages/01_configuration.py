@@ -310,7 +310,8 @@ if submitted:
         st.error("Please fill in all required fields marked with *")
     else:
         # Check if output directory already exists
-        output_path = Path.home() / "Drug_pipeline" / "outputs" / output_dir_name
+        project_root = Path(__file__).parent.parent 
+        output_path = project_root / "outputs" / output_dir_name
         if output_path.exists():
             st.error(f"Output directory '{output_dir_name}' already exists. Please choose a different name.")
         else:
