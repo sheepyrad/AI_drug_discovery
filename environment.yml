@@ -20,6 +20,8 @@ dependencies:
   - matplotlib-base
   - seaborn
   - jupyterlab
+  - medchem=2.0.5
+  - lilly-medchem-rules=1.0.1=hfc55251_1
   - ipywidgets
   - openmm >=8.0
   - ambertools >=23
