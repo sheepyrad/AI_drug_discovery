@@ -35,6 +35,7 @@ dependencies:
   - pyyaml
   - imageio
   - omegaconf
+  - einops
   - pip
   - pip:
     - posebusters >=0.3
